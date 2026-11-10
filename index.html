@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Traçar AR</title>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+    "mindar-image-three": "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js",
+    "mindar-image": "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image.prod.js"
+  }
+}
+</script>
+<style>
+  :root {
+    --bg: #faf7f2; --ink: #1d1b19; --muted: #6b655e; --line: #e4ddd2;
+    --accent: #d2552b; --accent-ink: #fff; --ok: #2f8a4c; --card: #fff;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  button { font: inherit; }
+  .hidden { display: none !important; }
+
+  /* ---------- Setup ---------- */
+  #setup { max-width: 560px; margin: 0 auto;
+    padding: calc(env(safe-area-inset-top) + 20px) 18px calc(env(safe-area-inset-bottom) + 28px); }
+  h1 { font-size: 28px; margin: 4px 0 2px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin: 0 0 20px; line-height: 1.45; }
+  .step { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin-bottom: 14px; }
+  .step h2 { font-size: 17px; margin: 0 0 8px; display: flex; align-items: center; gap: 10px; }
+  .num { width: 26px; height: 26px; border-radius: 50%; background: var(--ink); color: #fff;
+    display: inline-grid; place-items: center; font-size: 14px; flex: none; }
+  .step.done .num { background: var(--ok); }
+  .step p, .step li { color: var(--muted); font-size: 14.5px; line-height: 1.5; margin: 0 0 8px; }
+  .step ul { padding-left: 18px; margin: 0 0 10px; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 12px;
+    padding: 12px 16px; background: var(--ink); color: #fff; font-weight: 600; font-size: 15px; cursor: pointer; width: 100%; }
+  .btn.secondary { background: #efe9df; color: var(--ink); }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); font-size: 17px; padding: 15px; }
+  .btn:disabled { opacity: .4; }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; }
+  .preview { margin-top: 12px; display: flex; gap: 12px; align-items: center; }
+  .preview img { width: 84px; height: 84px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line);
+    background: repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0/16px 16px; }
+  .preview .info { font-size: 14px; color: var(--muted); }
+  .progress { height: 8px; background: #efe9df; border-radius: 99px; overflow: hidden; margin-top: 10px; }
+  .progress > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  label.check { display: flex; align-items: center; gap: 10px; font-size: 15px; margin-top: 12px; color: var(--ink); }
+  label.check input { width: 20px; height: 20px; accent-color: var(--accent); }
+  .marker-demo { display: block; width: 100%; max-width: 220px; margin: 6px auto 12px; }
+  .note { font-size: 13px; color: var(--muted); text-align: center; margin-top: 12px; line-height: 1.45; }
+  .err { color: #b3261e; font-size: 14px; margin-top: 8px; }
+
+  /* ---------- AR ---------- */
+  #ar { position: fixed; inset: 0; background: #000; }
+  #arContainer { position: absolute; inset: 0; overflow: hidden; }
+  #arContainer video { object-fit: cover; }
+  .topbar { position: absolute; left: 0; right: 0; top: 0; z-index: 20; display: flex; justify-content: space-between;
+    align-items: center; gap: 8px; padding: calc(env(safe-area-inset-top) + 10px) 12px 10px; pointer-events: none; }
+  .topbar > * { pointer-events: auto; }
+  .pill { background: rgba(0,0,0,.6); color: #fff; border-radius: 99px; padding: 8px 14px; font-size: 14px; font-weight: 600;
+    display: inline-flex; align-items: center; gap: 8px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 0; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #f2b33d; }
+  .pill.found .dot { background: #4cd17a; }
+  .panel { position: absolute; left: 0; right: 0; bottom: 0; z-index: 20; background: rgba(20,18,16,.82);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); color: #fff;
+    padding: 12px 16px calc(env(safe-area-inset-bottom) + 12px); border-radius: 18px 18px 0 0; }
+  .panel .grid { display: grid; grid-template-columns: 74px 1fr 44px; gap: 6px 10px; align-items: center; font-size: 13px; }
+  .panel .grid span.v { text-align: right; color: #cfc8bf; font-variant-numeric: tabular-nums; }
+  .panel input[type=range] { width: 100%; accent-color: var(--accent); height: 28px; }
+  .panel .actions { display: flex; gap: 8px; margin-top: 10px; }
+  .panel .actions button { flex: 1; background: rgba(255,255,255,.14); color: #fff; border: 0; border-radius: 10px;
+    padding: 10px 6px; font-size: 13.5px; font-weight: 600; }
+  .panel .actions button.on { background: var(--accent); }
+  .hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); z-index: 15; color: #fff;
+    background: rgba(0,0,0,.55); padding: 14px 18px; border-radius: 14px; text-align: center; font-size: 15px;
+    line-height: 1.45; max-width: 82%; pointer-events: none; }
+  #loading { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; color: #fff; background: #000; font-size: 15px; }
+  /* MindAR's default UI overlays */
+  .mindar-ui-overlay { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- ================= SETUP ================= -->
+<section id="setup">
+  <h1>Traçar AR</h1>
+  <p class="sub">Projete uma imagem no papel pela câmera e trace por cima. A imagem fica presa a um marcador desenhado na folha, então continua no lugar mesmo se o celular se mexer.</p>
+
+  <div id="resumeBox" class="step hidden">
+    <h2>Continuar de onde parou</h2>
+    <p>Você já tem um marcador e uma imagem salvos neste aparelho, junto com a última posição.</p>
+    <button class="btn primary" id="resumeBtn">Continuar traçando</button>
+  </div>
+
+  <div class="step" id="step1">
+    <h2><span class="num">1</span> Faça o marcador</h2>
+    <svg class="marker-demo" viewBox="0 0 220 120" aria-hidden="true">
+      <rect x="4" y="4" width="212" height="112" rx="6" fill="#fff" stroke="#e4ddd2"/>
+      <g stroke="#1d1b19" stroke-width="2.4" fill="none" stroke-linecap="round">
+        <rect x="16" y="16" width="56" height="56"/>
+        <path d="M22 28 L40 22 L36 44 L60 30 M24 60 L48 50 L66 66 M30 36 Q44 70 62 44 M52 22 L66 40 M20 46 L34 52"/>
+        <circle cx="50" cy="38" r="5"/>
+        <path d="M26 66 l8 -8 M58 56 l8 4"/>
+      </g>
+      <rect x="86" y="16" width="118" height="92" fill="none" stroke="#d2552b" stroke-width="1.5" stroke-dasharray="5 4"/>
+      <text x="145" y="66" font-size="11" text-anchor="middle" fill="#d2552b" font-family="sans-serif">área do desenho</text>
+    </svg>
+    <ul>
+      <li>Num canto da folha, desenhe um quadrado de uns 5 cm com caneta preta grossa.</li>
+      <li>Encha o quadrado de rabiscos <b>diferentes e sem padrão</b>: linhas cruzadas, curvas, um círculo, ângulos. Quanto mais detalhes, melhor o celular reconhece.</li>
+      <li>Também funciona um objeto com bastante estampa ao lado da folha (um cartão, uma nota de dinheiro, uma embalagem). Só não pode sair do lugar.</li>
+    </ul>
+    <p>Fotografe o marcador <b>de cima e bem de perto</b>, com ele ocupando quase toda a foto e com boa luz.</p>
+    <input type="file" id="markerInput" accept="image/*" capture="environment" class="hidden">
+    <button class="btn" id="markerBtn">📷 Fotografar marcador</button>
+    <div class="preview hidden" id="markerPreview">
+      <img id="markerImg" alt="Marcador">
+      <div class="info" id="markerInfo">Preparando…</div>
+    </div>
+    <div class="progress hidden" id="markerProgress"><div></div></div>
+    <div class="err hidden" id="markerErr"></div>
+  </div>
+
+  <div class="step" id="step2">
+    <h2><span class="num">2</span> Escolha a imagem</h2>
+    <p>A foto ou o desenho que você quer traçar.</p>
+    <input type="file" id="imageInput" accept="image/*" class="hidden">
+    <button class="btn" id="imageBtn">🖼️ Escolher imagem</button>
+    <label class="check"><input type="checkbox" id="lineArt"> Converter em contorno (só as linhas)</label>
+    <div class="preview hidden" id="imagePreview">
+      <img id="imageImg" alt="Imagem">
+      <div class="info" id="imageInfo"></div>
+    </div>
+  </div>
+
+  <div class="step" id="step3">
+    <h2><span class="num">3</span> Posicione e trace</h2>
+    <p>Apoie o celular num copo ou suporte, de 25 a 40 cm acima da folha, com o marcador sempre aparecendo na câmera. Depois ajuste posição, tamanho e transparência. Tudo fica salvo neste aparelho.</p>
+    <button class="btn primary" id="startBtn" disabled>Abrir câmera</button>
+  </div>
+
+  <p class="note">Tudo fica no seu celular: as imagens não são enviadas para nenhum servidor.<br>No iPhone, abra pelo Safari.</p>
+</section>
+
+<!-- ================= AR ================= -->
+<section id="ar" class="hidden">
+  <div id="arContainer"></div>
+  <div id="loading">Abrindo câmera…</div>
+  <div class="topbar">
+    <button class="pill" id="backBtn">‹ Voltar</button>
+    <span class="pill" id="status"><span class="dot"></span><span id="statusText">Procurando marcador…</span></span>
+  </div>
+  <div class="hint" id="hint">Aponte a câmera para o marcador no papel</div>
+  <div class="panel" id="panel">
+    <div class="grid" id="sliders"></div>
+    <div class="actions">
+      <button id="hideBtn">Esconder</button>
+      <button id="resetBtn">Centralizar</button>
+      <button id="lockBtn">🔒 Travar</button>
+    </div>
+  </div>
+  <button class="pill hidden" id="showBtn" style="position:absolute;right:12px;bottom:calc(env(safe-area-inset-bottom) + 14px);z-index:20">Ajustes</button>
+</section>
+
+<script type="module">
+import * as THREE from 'three';
+
+/* ---------- Storage (IndexedDB for blobs, localStorage for settings) ---------- */
+const DB_NAME = 'tracar-ar', STORE = 'kv';
+function idb() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(DB_NAME, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(STORE);
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+}
+async function put(key, val) {
+  try { const db = await idb(); await new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readwrite'); tx.objectStore(STORE).put(val, key);
+    tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); } catch (e) { console.warn(e); }
+}
+async function get(key) {
+  try { const db = await idb(); return await new Promise((res, rej) => {
+    const r = db.transaction(STORE).objectStore(STORE).get(key);
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); } catch (e) { return undefined; }
+}
+const DEFAULTS = { x: 1.6, y: -0.6, scale: 2.5, rot: 0, opacity: 0.55 };
+function loadSettings() { try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem('tracar-settings') || '{}') }; } catch { return { ...DEFAULTS }; } }
+function saveSettings(s) { try { localStorage.setItem('tracar-settings', JSON.stringify(s)); } catch {} }
+
+/* ---------- State ---------- */
+const $ = id => document.getElementById(id);
+const state = { markerData: null, markerURL: null, imageURL: null, imageAspect: 1, markerAspect: 1 };
+
+function blobToDataURL(blob) { return new Promise(r => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(blob); }); }
+function loadImg(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
+
+// Downscale an image file to a manageable size, returning a data URL
+async function normalize(file, maxSide) {
+  const url = URL.createObjectURL(file);
+  const img = await loadImg(url);
+  const k = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+  const c = document.createElement('canvas');
+  c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  URL.revokeObjectURL(url);
+  return c.toDataURL('image/jpeg', 0.92);
+}
+
+/* ---------- Line-art conversion (Sobel edges → dark lines on transparent) ---------- */
+async function toLineArt(dataURL) {
+  const img = await loadImg(dataURL);
+  const w = img.naturalWidth, h = img.naturalHeight;
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  ctx.filter = 'blur(1px)'; ctx.drawImage(img, 0, 0); ctx.filter = 'none';
+  const src = ctx.getImageData(0, 0, w, h).data;
+  const g = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) g[i] = 0.299 * src[i*4] + 0.587 * src[i*4+1] + 0.114 * src[i*4+2];
+  const out = ctx.createImageData(w, h); const d = out.data;
+  const mags = new Float32Array(w * h); let max = 1;
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x;
+    const gx = -g[i-w-1] - 2*g[i-1] - g[i+w-1] + g[i-w+1] + 2*g[i+1] + g[i+w+1];
+    const gy = -g[i-w-1] - 2*g[i-w] - g[i-w+1] + g[i+w-1] + 2*g[i+w] + g[i+w+1];
+    const m = Math.hypot(gx, gy); mags[i] = m; if (m > max) max = m;
+  }
+  const t = max * 0.12;
+  for (let i = 0; i < w * h; i++) {
+    const a = Math.max(0, Math.min(1, (mags[i] - t) / (max * 0.25)));
+    d[i*4] = 15; d[i*4+1] = 15; d[i*4+2] = 15; d[i*4+3] = Math.round(a * 255);
+  }
+  ctx.putImageData(out, 0, 0);
+  return c.toDataURL('image/png');
+}
+
+/* ---------- Step 1: marker ---------- */
+$('markerBtn').onclick = () => $('markerInput').click();
+$('markerInput').onchange = async e => {
+  const file = e.target.files[0]; if (!file) return;
+  e.target.value = '';
+  $('markerErr').classList.add('hidden');
+  $('step1').classList.remove('done');
+  state.markerData = null; updateStart();
+  const dataURL = await normalize(file, 900);
+  $('markerImg').src = dataURL;
+  $('markerPreview').classList.remove('hidden');
+  $('markerInfo').textContent = 'Analisando o marcador… (pode levar uns 20 segundos)';
+  const bar = $('markerProgress'); bar.classList.remove('hidden'); bar.firstElementChild.style.width = '0%';
+  $('markerBtn').disabled = true;
+  try {
+    await import('mindar-image');
+    const img = await loadImg(dataURL);
+    const compiler = new window.MINDAR.IMAGE.Compiler();
+    const data = await compiler.compileImageTargets([img], p => { bar.firstElementChild.style.width = Math.round(p) + '%'; });
+    const pts = data?.[0]?.trackingData?.[0]?.points?.length ?? null;
+    const buf = await compiler.exportData();
+    state.markerData = buf;
+    state.markerAspect = img.naturalHeight / img.naturalWidth;
+    await put('marker', { buf, preview: dataURL, aspect: state.markerAspect });
+    $('markerInfo').textContent = (pts !== null && pts < 20)
+      ? '⚠️ Marcador com poucos detalhes. Pode funcionar, mas se tremer muito, desenhe mais rabiscos e fotografe de novo.'
+      : '✅ Marcador pronto.';
+    $('step1').classList.add('done');
+  } catch (err) {
+    console.error(err);
+    $('markerErr').textContent = 'Não consegui analisar essa foto. Tente outra, de mais perto e com mais luz.';
+    $('markerErr').classList.remove('hidden');
+    $('markerInfo').textContent = '';
+  } finally {
+    bar.classList.add('hidden'); $('markerBtn').disabled = false; updateStart();
+  }
+};
+
+/* ---------- Step 2: image ---------- */
+let rawImageURL = null;
+$('imageBtn').onclick = () => $('imageInput').click();
+$('imageInput').onchange = async e => {
+  const file = e.target.files[0]; if (!file) return;
+  e.target.value = '';
+  rawImageURL = await normalize(file, 1600);
+  await applyImage();
+};
+$('lineArt').onchange = () => { if (rawImageURL) applyImage(); };
+async function applyImage() {
+  $('imageInfo').textContent = 'Processando…';
+  $('imagePreview').classList.remove('hidden');
+  const url = $('lineArt').checked ? await toLineArt(rawImageURL) : rawImageURL;
+  const img = await loadImg(url);
+  state.imageURL = url; state.imageAspect = img.naturalHeight / img.naturalWidth;
+  $('imageImg').src = url;
+  $('imageInfo').textContent = '✅ Imagem pronta.';
+  $('step2').classList.add('done');
+  await put('image', { url, raw: rawImageURL, lineArt: $('lineArt').checked });
+  updateStart();
+}
+
+function updateStart() { $('startBtn').disabled = !(state.markerData && state.imageURL); }
+
+/* ---------- Resume saved session ---------- */
+(async () => {
+  const m = await get('marker'), im = await get('image');
+  if (m?.buf) {
+    state.markerData = m.buf; state.markerAspect = m.aspect || 1;
+    $('markerImg').src = m.preview; $('markerPreview').classList.remove('hidden');
+    $('markerInfo').textContent = '✅ Marcador salvo.'; $('step1').classList.add('done');
+  }
+  if (im?.url) {
+    state.imageURL = im.url; rawImageURL = im.raw || im.url; $('lineArt').checked = !!im.lineArt;
+    const img = await loadImg(im.url); state.imageAspect = img.naturalHeight / img.naturalWidth;
+    $('imageImg').src = im.url; $('imagePreview').classList.remove('hidden');
+    $('imageInfo').textContent = '✅ Imagem salva.'; $('step2').classList.add('done');
+  }
+  updateStart();
+  if (m?.buf && im?.url) $('resumeBox').classList.remove('hidden');
+})();
+
+/* ---------- AR ---------- */
+let mindar = null, plane = null, settings = loadSettings(), locked = false;
+$('startBtn').onclick = startAR;
+$('resumeBtn').onclick = startAR;
+$('backBtn').onclick = stopAR;
+
+const SLIDERS = [
+  { key: 'opacity', label: 'Transparência', min: 0.05, max: 1, step: 0.01, fmt: v => Math.round(v * 100) + '%' },
+  { key: 'scale', label: 'Tamanho', min: 0.3, max: 8, step: 0.01, fmt: v => v.toFixed(1) + '×' },
+  { key: 'x', label: '↔ Lado', min: -5, max: 5, step: 0.01, fmt: v => v.toFixed(1) },
+  { key: 'y', label: '↕ Altura', min: -5, max: 5, step: 0.01, fmt: v => v.toFixed(1) },
+  { key: 'rot', label: 'Girar', min: -180, max: 180, step: 1, fmt: v => Math.round(v) + '°' },
+];
+function buildSliders() {
+  const g = $('sliders'); g.innerHTML = '';
+  for (const s of SLIDERS) {
+    const lab = document.createElement('span'); lab.textContent = s.label;
+    const inp = document.createElement('input'); inp.type = 'range';
+    Object.assign(inp, { min: s.min, max: s.max, step: s.step, value: settings[s.key] });
+    const val = document.createElement('span'); val.className = 'v'; val.textContent = s.fmt(settings[s.key]);
+    inp.oninput = () => { settings[s.key] = parseFloat(inp.value); val.textContent = s.fmt(settings[s.key]); applySettings(); saveSettings(settings); };
+    inp.dataset.key = s.key;
+    g.append(lab, inp, val);
+  }
+}
+function applySettings() {
+  if (!plane) return;
+  plane.position.set(settings.x, settings.y, 0.001);
+  plane.scale.set(settings.scale, settings.scale * state.imageAspect, 1);
+  plane.rotation.z = -settings.rot * Math.PI / 180;
+  plane.material.opacity = settings.opacity;
+}
+function setLocked(v) {
+  locked = v;
+  $('lockBtn').classList.toggle('on', v);
+  $('lockBtn').textContent = v ? '🔓 Destravar' : '🔒 Travar';
+  $('sliders').querySelectorAll('input').forEach(i => { if (i.dataset.key !== 'opacity') i.disabled = v; });
+}
+$('lockBtn').onclick = () => setLocked(!locked);
+$('resetBtn').onclick = () => {
+  if (locked) return;
+  settings = { ...settings, x: DEFAULTS.x, y: DEFAULTS.y, rot: 0 };
+  saveSettings(settings); buildSliders(); applySettings(); setLocked(false);
+};
+$('hideBtn').onclick = () => { $('panel').classList.add('hidden'); $('showBtn').classList.remove('hidden'); };
+$('showBtn').onclick = () => { $('panel').classList.remove('hidden'); $('showBtn').classList.add('hidden'); };
+
+async function startAR() {
+  $('setup').classList.add('hidden'); $('ar').classList.remove('hidden');
+  $('loading').classList.remove('hidden'); $('loading').textContent = 'Abrindo câmera…';
+  settings = loadSettings(); buildSliders(); setLocked(false);
+  try {
+    const { MindARThree } = await import('mindar-image-three');
+    if (state.markerURL) URL.revokeObjectURL(state.markerURL);
+    state.markerURL = URL.createObjectURL(new Blob([state.markerData]));
+    mindar = new MindARThree({
+      container: $('arContainer'),
+      imageTargetSrc: state.markerURL,
+      maxTrack: 1,
+      uiLoading: 'no', uiScanning: 'no', uiError: 'no',
+      filterMinCF: 0.0001, filterBeta: 0.001,   // stronger smoothing = less jitter
+      warmupTolerance: 3, missTolerance: 12,     // keep the image a bit longer if tracking blips
+    });
+    const { renderer, scene, camera } = mindar;
+    const tex = await new THREE.TextureLoader().loadAsync(state.imageURL);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    plane = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: settings.opacity, depthWrite: false, side: THREE.DoubleSide })
+    );
+    applySettings();
+    const anchor = mindar.addAnchor(0);
+    anchor.group.add(plane);
+    anchor.onTargetFound = () => {
+      $('status').classList.add('found'); $('statusText').textContent = 'Marcador encontrado'; $('hint').classList.add('hidden');
+    };
+    anchor.onTargetLost = () => {
+      $('status').classList.remove('found'); $('statusText').textContent = 'Procurando marcador…'; $('hint').classList.remove('hidden');
+    };
+    await mindar.start();
+    $('loading').classList.add('hidden');
+    renderer.setAnimationLoop(() => renderer.render(scene, camera));
+  } catch (err) {
+    console.error(err);
+    $('loading').innerHTML = '<div style="padding:24px;text-align:center;line-height:1.5">Não consegui abrir a câmera.<br>' +
+      'Confira se o site está em <b>https://</b>, se está no Safari e se a câmera foi permitida ' +
+      '(Ajustes › Safari › Câmera).<br><br><button class="btn secondary" onclick="location.reload()">Tentar de novo</button></div>';
+  }
+}
+function stopAR() {
+  try { mindar?.renderer.setAnimationLoop(null); mindar?.stop(); } catch {}
+  $('arContainer').innerHTML = ''; mindar = null; plane = null;
+  $('ar').classList.add('hidden'); $('setup').classList.remove('hidden');
+  $('status').classList.remove('found'); $('statusText').textContent = 'Procurando marcador…'; $('hint').classList.remove('hidden');
+}
+</script>
+</body>
+</html>
